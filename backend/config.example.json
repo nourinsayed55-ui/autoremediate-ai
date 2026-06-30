@@ -1,0 +1,19 @@
+{
+  "nessus_api": {
+    "base_url": "https://<KALI_IP>:8834",
+    "access_key": "<NESSUS_ACCESS_KEY>",
+    "secret_key": "<NESSUS_SECRET_KEY>"
+  },
+  "target_node": {
+    "host_ip": "<METASPLOITABLE2_IP>",
+    "ssh_user": "<SSH_USERNAME>",
+    "ssh_pass": "<SSH_PASSWORD>"
+  },
+  "automation_rules": {
+    "require_manual_approval": true,
+    "retry_attempts": 3
+  },
+  "database": {
+    "connection_string": "postgresql://<USER>:<PASSWORD>@<HOST>:5432/<DBNAME>?sslmode=require"
+  }
+}

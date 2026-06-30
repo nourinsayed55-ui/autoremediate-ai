@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AutoRemediate AI — SOC Console</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <style>
+    /* ── Variables ──────────────────────────────────────────────────────── */
+    :root {
+      --bg:        #0a0e1a;
+      --surface:   rgba(13, 17, 23, 0.85);
+      --surface2:  rgba(22, 27, 34, 0.9);
+      --border:    rgba(255, 255, 255, 0.07);
+      --border2:   rgba(255, 255, 255, 0.12);
+      --text:      #c9d1d9;
+      --muted:     #6e7681;
+      --emerald:   #10b981;
+      --cyan:      #06b6d4;
+      --amber:     #f59e0b;
+      --orange:    #f97316;
+      --red:       #ef4444;
+      --critical:  #ff4444;
+      --high:      #f97316;
+      --glow-g:    rgba(16, 185, 129, 0.18);
+      --glow-r:    rgba(239, 68, 68, 0.18);
+      --glow-a:    rgba(245, 158, 11, 0.18);
+    }
+
+    /* ── Reset ──────────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Background grid + radial glow ─────────────────────────────────── */
+    .bg-grid {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background-image:
+        linear-gradient(rgba(16, 185, 129, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(16, 185, 129, 0.025) 1px, transparent 1px);
+      background-size: 48px 48px;
+    }
+    .bg-radial {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background: radial-gradient(ellipse 70% 55% at 50% 40%,
+        rgba(16, 185, 129, 0.04) 0%, transparent 70%);
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────────── */
+    header {
+      position: sticky; top: 0; z-index: 200;
+      background: rgba(8, 11, 22, 0.95);
+      border-bottom: 1px solid var(--border2);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      padding: 0 24px;
+      height: 64px;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 16px;
+    }
+    .hd-brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+    .beacon {
+      position: relative; width: 18px; height: 18px; flex-shrink: 0;
+    }
+    .beacon-ring {
+      position: absolute; inset: -4px;
+      border-radius: 50%;
+      border: 2px solid var(--emerald);
+      animation: beacon-pulse 2s ease-out infinite;
+    }
+    .beacon-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--emerald);
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      transition: background 0.4s;
+    }
+    .beacon.offline .beacon-dot  { background: var(--red); }
+    .beacon.offline .beacon-ring { border-color: var(--red); }
+    @keyframes beacon-pulse {
+      0%   { transform: scale(0.9); opacity: 0.9; }
+      70%  { transform: scale(1.5); opacity: 0; }
+      100% { transform: scale(0.9); opacity: 0; }
+    }
+    .hd-title { min-width: 0; }
+    .hd-main  { font-size: 15px; font-weight: 700; color: var(--emerald); letter-spacing: .4px; white-space: nowrap; }
+    .hd-sub   { font-size: 10px; color: var(--muted); letter-spacing: .5px; white-space: nowrap; }
+
+    .hd-center { text-align: center; flex-shrink: 0; }
+    .live-clock {
+      font-family: 'Consolas', monospace;
+      font-size: 20px; font-weight: 700;
+      color: var(--cyan); letter-spacing: 2px;
+    }
+    .scan-badge {
+      font-size: 10px; color: var(--muted); letter-spacing: .8px;
+      margin-top: 1px;
+    }
+    .scan-badge .s-dot {
+      display: inline-block; width: 5px; height: 5px;
+      border-radius: 50%; background: var(--emerald);
+      margin-right: 5px; vertical-align: middle;
+      animation: blink 1.4s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    /* Posture ring */
+    .hd-right { display: flex; align-items: center; }
+    .posture-wrap {
+      position: relative; width: 68px; height: 68px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .posture-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .ring-track   { fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 7; }
+    .ring-progress {
+      fill: none; stroke: var(--emerald); stroke-width: 7;
+      stroke-linecap: round;
+      transition: stroke-dasharray 0.9s cubic-bezier(.4,0,.2,1), stroke 0.5s;
+    }
+    .posture-label-wrap {
+      position: relative; text-align: center; z-index: 1;
+    }
+    .posture-pct  { font-family: 'Consolas', monospace; font-size: 14px; font-weight: 700; color: var(--emerald); line-height: 1; }
+    .posture-lbl  { font-size: 7px; color: var(--muted); letter-spacing: 1.2px; margin-top: 2px; }
+
+    /* ── Dashboard container ─────────────────────────────────────────────── */
+    .dash {
+      position: relative; z-index: 1;
+      padding: 20px 24px 32px;
+      display: flex; flex-direction: column; gap: 18px;
+      max-width: 1920px; margin: 0 auto;
+    }
+
+    /* ── Counter strip ───────────────────────────────────────────────────── */
+    .counters-strip {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+    }
+    .cnt-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px 14px;
+      backdrop-filter: blur(12px);
+      transition: border-color .25s, box-shadow .25s;
+    }
+    .cnt-card:hover { border-color: var(--border2); box-shadow: 0 4px 24px rgba(0,0,0,.3); }
+    .cnt-num {
+      font-family: 'Consolas', monospace;
+      font-size: 34px; font-weight: 700;
+      color: var(--text); line-height: 1;
+      transition: color .3s;
+    }
+    .cnt-lbl {
+      font-size: 10px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 1px;
+      margin-top: 6px;
+    }
+    .cnt-card.c-orange  .cnt-num { color: var(--orange); }
+    .cnt-card.c-green   .cnt-num { color: var(--emerald); }
+    .cnt-card.c-red     .cnt-num { color: var(--red); }
+    .cnt-card.c-amber   .cnt-num { color: var(--amber); }
+    .cnt-card.c-green   { box-shadow: 0 0 0 1px rgba(16,185,129,.08) inset; }
+    .cnt-card.c-red     { box-shadow: 0 0 0 1px rgba(239,68,68,.08) inset; }
+
+    /* ── Glass cards (reusable) ──────────────────────────────────────────── */
+    .glass {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    .card-hd {
+      font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1.2px;
+      color: var(--muted);
+      padding: 14px 18px 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .card-hd-note { font-weight: 400; letter-spacing: .4px; text-transform: none; font-size: 10px; }
+
+    /* ── Charts strip ────────────────────────────────────────────────────── */
+    .charts-strip {
+      display: grid;
+      grid-template-columns: 260px 1fr 220px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    /* Donut card */
+    .donut-card { }
+    .donut-outer { padding: 16px 12px 12px; }
+    .donut-canvas-wrap {
+      position: relative; width: 180px; height: 180px; margin: 0 auto;
+    }
+    .donut-center {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center; pointer-events: none;
+    }
+    .dc-num  { font-family: 'Consolas', monospace; font-size: 26px; font-weight: 700; color: var(--text); }
+    .dc-sub  { font-size: 9px; color: var(--muted); letter-spacing: .8px; }
+    .donut-legend { margin-top: 14px; }
+    .legend-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 4px 0; font-size: 11px;
+    }
+    .legend-dot {
+      width: 8px; height: 8px; border-radius: 2px; margin-right: 7px; flex-shrink: 0;
+    }
+    .legend-name { flex: 1; color: var(--text); }
+    .legend-val  { font-family: 'Consolas', monospace; color: var(--muted); font-size: 11px; }
+
+    /* Bar card */
+    .bar-card .bar-wrap { padding: 12px 16px 16px; height: 220px; }
+
+    /* Metrics card */
+    .metrics-card { }
+    .metrics-grid { padding: 12px 16px 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .metric-box {
+      background: rgba(255,255,255,.02);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 10px 12px;
+    }
+    .metric-box.span2 { grid-column: 1/-1; }
+    .metric-num {
+      font-family: 'Consolas', monospace;
+      font-size: 18px; font-weight: 700; color: var(--text); line-height: 1;
+    }
+    .metric-num.c-green  { color: var(--emerald); }
+    .metric-num.c-red    { color: var(--red); }
+    .metric-num.c-amber  { color: var(--amber); }
+    .metric-num.c-cyan   { color: var(--cyan); }
+    .metric-lbl { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin-top: 4px; }
+
+    /* ── Port chips strip ────────────────────────────────────────────────── */
+    .chips-strip { }
+    .chips-wrap {
+      padding: 12px 16px 16px;
+      display: flex; flex-wrap: wrap; gap: 8px;
+    }
+    .chip-empty { color: var(--muted); font-size: 11px; padding: 4px 0; }
+    .port-chip {
+      display: inline-flex; flex-direction: column; align-items: center;
+      padding: 8px 14px; border-radius: 8px; border: 1px solid;
+      font-size: 11px; cursor: default; min-width: 64px;
+      transition: transform .45s cubic-bezier(.34,1.56,.64,1),
+                  background .4s, border-color .4s, box-shadow .4s;
+    }
+    .port-chip:hover { transform: translateY(-2px); }
+    .chip-open-c {
+      border-color: rgba(239,68,68,.5); background: rgba(239,68,68,.08);
+      color: #fca5a5;
+    }
+    .chip-open-h {
+      border-color: rgba(249,115,22,.5); background: rgba(249,115,22,.08);
+      color: #fed7aa;
+    }
+    .chip-secured {
+      border-color: rgba(16,185,129,.5); background: rgba(16,185,129,.08);
+      color: #6ee7b7;
+      box-shadow: 0 0 10px rgba(16,185,129,.15);
+    }
+    .chip-port    { font-family: 'Consolas', monospace; font-size: 14px; font-weight: 700; }
+    .chip-svc     { font-size: 9px; opacity: .65; margin-top: 1px; }
+    .chip-ico     { font-size: 12px; margin-top: 3px; }
+    @keyframes chip-flip { 0%{transform:scale(1)} 50%{transform:scale(1.2)} 100%{transform:scale(1)} }
+    .chip-flip { animation: chip-flip .5s ease; }
+
+    /* ── Content strip ───────────────────────────────────────────────────── */
+    .content-strip {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 18px;
+      align-items: start;
+    }
+    .col-hd {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted);
+    }
+    .col-badge {
+      font-size: 10px; font-weight: 700;
+      background: rgba(255,255,255,.04);
+      border: 1px solid var(--border2);
+      border-radius: 20px;
+      padding: 2px 10px; color: var(--text);
+      transition: background .3s;
+    }
+
+    /* ── Finding cards (Priority Queue) ─────────────────────────────────── */
+    .queue-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+    #findings-container { padding: 14px 14px 8px; display: flex; flex-direction: column; gap: 12px; }
+    .finding-card {
+      background: rgba(22, 27, 34, 0.7);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      transition: border-color .3s, box-shadow .3s;
+    }
+    .finding-card:hover { border-color: var(--border2); }
+    .finding-card.s-done    { border-color: rgba(16,185,129,.35); box-shadow: 0 0 18px rgba(16,185,129,.08); }
+    .finding-card.s-failed  { border-color: rgba(239,68,68,.35);  box-shadow: 0 0 18px rgba(239,68,68,.08); }
+    .finding-card.s-executing {
+      border-color: rgba(245,158,11,.35);
+      animation: exec-glow 1.2s ease-in-out infinite;
+    }
+    @keyframes exec-glow {
+      0%,100% { box-shadow: 0 0 8px rgba(245,158,11,.15); }
+      50%      { box-shadow: 0 0 22px rgba(245,158,11,.35); }
+    }
+    .finding-hd {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 10px 14px; background: rgba(0,0,0,.2);
+      border-bottom: 1px solid var(--border);
+    }
+    .sev-badge {
+      font-size: 9px; font-weight: 700; padding: 2px 8px; border-radius: 3px;
+      text-transform: uppercase; letter-spacing: .5px; white-space: nowrap;
+    }
+    .sev-Critical { background: rgba(255,68,68,.15); color: #ff8080; border: 1px solid rgba(255,68,68,.4); }
+    .sev-High     { background: rgba(249,115,22,.15); color: #fdb07a; border: 1px solid rgba(249,115,22,.4); }
+    .finding-name { font-size: 12px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; }
+    .finding-meta {
+      display: flex; gap: 12px; flex-wrap: wrap;
+      font-size: 10px; color: var(--muted); font-family: 'Consolas', monospace;
+      margin-left: auto;
+    }
+    .p-badge {
+      font-size: 9px; background: rgba(6,182,212,.08);
+      border: 1px solid rgba(6,182,212,.2); color: #67e8f9;
+      padding: 1px 7px; border-radius: 3px;
+    }
+    .finding-body { padding: 12px 14px; }
+
+    /* Option buttons */
+    .opts-grid { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 8px; }
+    .opt-btn {
+      border: 1px solid; border-radius: 5px; padding: 7px 12px;
+      font-family: inherit; font-size: 11px; cursor: pointer;
+      text-align: left; transition: opacity .15s, transform .1s, box-shadow .2s;
+    }
+    .opt-btn:hover:not(:disabled) { opacity: .85; transform: translateY(-1px); }
+    .opt-btn:active:not(:disabled) { transform: translateY(0); }
+    .opt-btn:disabled { opacity: .3; cursor: not-allowed; }
+    .btn-tier  { display: block; font-size: 8px; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 2px; opacity: .7; }
+    .btn-label { display: block; font-size: 11px; line-height: 1.3; }
+    .opt-preferred  { background: rgba(10,36,32,.8);  border-color: rgba(16,185,129,.5); color: #5eead4; }
+    .opt-preferred:hover:not(:disabled)   { box-shadow: 0 0 12px rgba(16,185,129,.25); }
+    .opt-suggested  { background: rgba(10,22,40,.8);  border-color: rgba(6,182,212,.4);  color: #67e8f9; }
+    .opt-suggested:hover:not(:disabled)   { box-shadow: 0 0 12px rgba(6,182,212,.2); }
+    .opt-alternative{ background: rgba(20,25,34,.8);  border-color: rgba(100,116,139,.4);color: #94a3b8; }
+    .opt-monitor    { background: rgba(28,18,8,.8);   border-color: rgba(245,158,11,.35);color: #fbbf24; }
+    .opt-monitor:hover:not(:disabled) { box-shadow: 0 0 12px rgba(245,158,11,.2); }
+    .sug-divider {
+      width: 100%; font-size: 9px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .8px;
+      padding: 4px 0 2px; border-top: 1px dashed rgba(255,255,255,.06);
+    }
+
+    /* Confirm panel */
+    .confirm-panel {
+      background: rgba(28,8,8,.9);
+      border: 1px solid rgba(239,68,68,.35);
+      border-radius: 6px; padding: 14px 16px; margin-top: 8px;
+      animation: panel-in .2s ease;
+    }
+    @keyframes panel-in { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:none} }
+    .confirm-hd  { font-size: 10px; color: #f87171; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+    .confirm-row { margin-bottom: 6px; font-size: 11px; }
+    .confirm-key { color: var(--muted); }
+    .confirm-cmd {
+      font-family: 'Consolas', monospace; font-size: 11px;
+      background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.06);
+      border-radius: 4px; padding: 6px 10px; color: #fbbf24;
+      word-break: break-all; margin-top: 3px;
+    }
+    .confirm-warn {
+      font-size: 10px; color: #fca5a5; margin: 10px 0;
+      padding: 6px 10px; background: rgba(45,15,15,.8);
+      border-left: 3px solid var(--red); border-radius: 0 4px 4px 0;
+    }
+    .confirm-btns { display: flex; gap: 8px; margin-top: 12px; }
+    .btn-exec {
+      background: rgba(124,32,32,.9); border: 1px solid var(--red);
+      color: #fecaca; font-family: inherit; font-size: 11px; font-weight: 700;
+      padding: 7px 16px; border-radius: 4px; cursor: pointer;
+      transition: background .15s;
+    }
+    .btn-exec:hover  { background: rgba(153,27,27,.9); }
+    .btn-cancel {
+      background: rgba(255,255,255,.04); border: 1px solid var(--border);
+      color: var(--muted); font-family: inherit; font-size: 11px;
+      padding: 7px 12px; border-radius: 4px; cursor: pointer;
+      transition: color .15s;
+    }
+    .btn-cancel:hover { color: var(--text); }
+
+    /* Executing spinner */
+    .exec-row {
+      display: flex; align-items: center; gap: 10px;
+      color: var(--amber); font-size: 11px; padding: 10px 0;
+    }
+    .spinner {
+      width: 15px; height: 15px; flex-shrink: 0;
+      border: 2px solid rgba(245,158,11,.25);
+      border-top-color: var(--amber);
+      border-radius: 50%;
+      animation: spin .75s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Result banner */
+    .result-banner {
+      border-radius: 5px; padding: 10px 14px; margin-top: 8px; font-size: 11px;
+      animation: panel-in .3s ease;
+    }
+    .res-success { background: rgba(10,32,16,.9); border: 1px solid rgba(16,185,129,.35); color: #6ee7b7; }
+    .res-failed  { background: rgba(32,10,10,.9); border: 1px solid rgba(239,68,68,.35);  color: #fca5a5; }
+    .res-skipped { background: rgba(28,20,8,.9);  border: 1px solid rgba(245,158,11,.35); color: #fde68a; }
+    .res-lbl  { font-weight: 700; display: block; margin-bottom: 3px; }
+    .res-cmd  { color: var(--muted); font-family: 'Consolas', monospace; font-size: 10px; word-break: break-all; }
+    .res-note { color: var(--amber); font-size: 10px; margin-top: 4px; display: block; }
+
+    /* ── Timeline feed ───────────────────────────────────────────────────── */
+    .timeline-panel {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px;
+      position: sticky; top: 82px; max-height: calc(100vh - 110px);
+      display: flex; flex-direction: column;
+    }
+    .timeline-feed {
+      flex: 1; overflow-y: auto; padding: 12px 14px;
+      scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.08) transparent;
+    }
+    .tl-empty { color: var(--muted); font-size: 11px; padding: 20px 0; text-align: center; }
+    .tl-refresh { font-size: 9px; color: var(--muted); letter-spacing: .4px; font-weight: 400; text-transform: none; }
+
+    .tl-entry {
+      position: relative; padding: 9px 12px 9px 14px;
+      border-left: 2px solid; border-radius: 0 6px 6px 0;
+      background: rgba(255,255,255,.02);
+      margin-bottom: 9px; font-size: 11px;
+      transition: opacity .3s;
+    }
+    .tl-entry.e-success { border-left-color: var(--emerald); }
+    .tl-entry.e-failed  { border-left-color: var(--red); }
+    .tl-entry.e-skipped { border-left-color: var(--amber); }
+    @keyframes slide-in {
+      from { opacity: 0; transform: translateX(-14px); }
+      to   { opacity: 1; transform: none; }
+    }
+    .tl-entry.new { animation: slide-in .35s ease forwards; }
+    .tl-ts      { font-family: 'Consolas', monospace; font-size: 9px; color: var(--muted); margin-bottom: 4px; }
+    .tl-plugin  { font-weight: 600; color: var(--text); }
+    .tl-cmd     { color: var(--muted); font-family: 'Consolas', monospace; font-size: 10px; word-break: break-all; margin-top: 2px; }
+    .tl-status-badge {
+      display: inline-block; font-size: 9px; font-weight: 700;
+      padding: 1px 8px; border-radius: 3px; margin-top: 4px;
+    }
+    .badge-success { background: rgba(16,185,129,.15); color: #6ee7b7; border: 1px solid rgba(16,185,129,.3); }
+    .badge-failed  { background: rgba(239,68,68,.15);  color: #fca5a5; border: 1px solid rgba(239,68,68,.3); }
+    .badge-skipped { background: rgba(245,158,11,.15); color: #fde68a; border: 1px solid rgba(245,158,11,.3); }
+
+    /* ── Misc ────────────────────────────────────────────────────────────── */
+    .loading-msg { color: var(--muted); padding: 24px; text-align: center; font-size: 12px; }
+    .error-box   { background: rgba(32,10,10,.9); border: 1px solid rgba(239,68,68,.3); border-radius: 6px; padding: 12px 16px; color: #fca5a5; margin: 12px; font-size: 11px; }
+
+    /* ── Responsive ──────────────────────────────────────────────────────── */
+    @media (max-width: 1200px) {
+      .charts-strip { grid-template-columns: 260px 1fr; }
+      .metrics-card { display: none; }
+    }
+    @media (max-width: 900px) {
+      .counters-strip { grid-template-columns: repeat(3, 1fr); }
+      .charts-strip   { grid-template-columns: 1fr; }
+      .content-strip  { grid-template-columns: 1fr; }
+      .timeline-panel { position: static; max-height: 400px; }
+    }
+    @media (max-width: 600px) {
+      .counters-strip { grid-template-columns: repeat(2, 1fr); }
+      header { padding: 0 12px; }
+      .dash  { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="bg-grid"   aria-hidden="true"></div>
+<div class="bg-radial" aria-hidden="true"></div>
+
+<!-- ── Header ── -->
+<header>
+  <div class="hd-brand">
+    <div class="beacon" id="beacon">
+      <div class="beacon-ring"></div>
+      <div class="beacon-dot"></div>
+    </div>
+    <div class="hd-title">
+      <div class="hd-main">AutoRemediate AI</div>
+      <div class="hd-sub">Security Operations Center — Remediation Console</div>
+    </div>
+  </div>
+
+  <div class="hd-center">
+    <div class="live-clock" id="live-clock">--:--:--</div>
+    <div class="scan-badge"><span class="s-dot"></span>SCAN #12 &nbsp;|&nbsp; 192.168.244.128</div>
+  </div>
+
+  <div class="hd-right">
+    <div class="posture-wrap">
+      <svg class="posture-svg" viewBox="0 0 68 68">
+        <circle class="ring-track"    cx="34" cy="34" r="28"/>
+        <circle class="ring-progress" id="ring-prog" cx="34" cy="34" r="28"
+          stroke-dasharray="0 175.93" transform="rotate(-90 34 34)"/>
+      </svg>
+      <div class="posture-label-wrap">
+        <div class="posture-pct" id="posture-pct">0%</div>
+        <div class="posture-lbl">SECURE</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ── Dashboard ── -->
+<main class="dash">
+
+  <!-- Counter Strip -->
+  <div class="counters-strip">
+    <div class="cnt-card">
+      <div class="cnt-num" id="cv-total">—</div>
+      <div class="cnt-lbl">Total Findings</div>
+    </div>
+    <div class="cnt-card c-orange">
+      <div class="cnt-num" id="cv-crithigh">—</div>
+      <div class="cnt-lbl">Critical + High</div>
+    </div>
+    <div class="cnt-card c-green">
+      <div class="cnt-num" id="cv-success">—</div>
+      <div class="cnt-lbl">Remediated</div>
+    </div>
+    <div class="cnt-card c-red">
+      <div class="cnt-num" id="cv-failed">—</div>
+      <div class="cnt-lbl">Failed</div>
+    </div>
+    <div class="cnt-card c-amber">
+      <div class="cnt-num" id="cv-skipped">—</div>
+      <div class="cnt-lbl">Skipped</div>
+    </div>
+  </div>
+
+  <!-- Charts Strip -->
+  <div class="charts-strip">
+    <!-- Donut: severity breakdown -->
+    <div class="glass donut-card">
+      <div class="card-hd">Findings by Severity</div>
+      <div class="donut-outer">
+        <div class="donut-canvas-wrap">
+          <canvas id="severity-chart" width="180" height="180"></canvas>
+          <div class="donut-center">
+            <div class="dc-num" id="dc-num">—</div>
+            <div class="dc-sub">findings</div>
+          </div>
+        </div>
+        <div class="donut-legend" id="donut-legend"></div>
+      </div>
+    </div>
+
+    <!-- Bar: port / service -->
+    <div class="glass bar-card">
+      <div class="card-hd">Priority Score by Port &amp; Service</div>
+      <div class="bar-wrap"><canvas id="port-chart"></canvas></div>
+    </div>
+
+    <!-- Metrics -->
+    <div class="glass metrics-card">
+      <div class="card-hd">Operations Metrics</div>
+      <div class="metrics-grid">
+        <div class="metric-box span2">
+          <div class="metric-num c-green" id="m-rate">—</div>
+          <div class="metric-lbl">Success Rate</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-num" id="m-total">—</div>
+          <div class="metric-lbl">Total Actions</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-num c-cyan" id="m-mttr">—</div>
+          <div class="metric-lbl">Avg Between Remeds</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-num c-green" id="m-s">—</div>
+          <div class="metric-lbl">Success</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-num c-red" id="m-f">—</div>
+          <div class="metric-lbl">Failed</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-num c-amber" id="m-k">—</div>
+          <div class="metric-lbl">Skipped</div>
+        </div>
+        <div class="metric-box span2">
+          <div class="metric-num" id="m-db">—</div>
+          <div class="metric-lbl">Database</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Port Chips Strip -->
+  <div class="glass chips-strip">
+    <div class="card-hd">
+      Attack Surface — Open Ports
+      <span class="card-hd-note">chips flip green when successfully remediated</span>
+    </div>
+    <div class="chips-wrap" id="port-chips">
+      <span class="chip-empty">Loading…</span>
+    </div>
+  </div>
+
+  <!-- Content Strip: Queue + Timeline -->
+  <div class="content-strip">
+    <!-- Priority Queue -->
+    <div class="queue-panel">
+      <div class="col-hd">
+        Priority Queue — Pending Approvals
+        <span class="col-badge" id="queue-badge">—</span>
+      </div>
+      <div id="findings-container">
+        <div class="loading-msg">Loading findings…</div>
+      </div>
+    </div>
+
+    <!-- Activity Timeline -->
+    <div class="timeline-panel">
+      <div class="col-hd">
+        Live Activity Feed
+        <span class="tl-refresh" id="tl-refresh"></span>
+      </div>
+      <div class="timeline-feed" id="tl-feed">
+        <div class="tl-empty">No activity yet — approve a finding to begin.</div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════
+   AutoRemediate AI — SOC Dashboard JS
+   ─────────────────────────────────────────────────────────────────
+   All data comes from real backend endpoints.
+   The approval flow (one explicit click per finding) is preserved exactly.
+   ═══════════════════════════════════════════════════════════════════ */
+
+// ── State ─────────────────────────────────────────────────────────────────
+const S = {
+  findings:     [],
+  ports:        [],
+  findingStates:{},   // {[_id]: {stage:'idle'|'confirming'|'executing'|'done', pending, result}}
+  securedIds:   new Set(),  // finding _ids with Success result
+  shownLogIds:  new Set(),  // log_id values already in timeline
+  prevCounters: {},         // for count-up animation
+  severityChart: null,
+  portChart:     null,
+};
+
+// ── HTML escape ───────────────────────────────────────────────────────────
+const esc = s => String(s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const escA = s => String(s).replace(/'/g,"\\'");
+
+// ── API ───────────────────────────────────────────────────────────────────
+async function api(url, opts) {
+  try {
+    const r = await fetch(url, opts);
+    const d = await r.json();
+    return { ok: r.ok, status: r.status, data: d };
+  } catch (e) {
+    return { ok: false, status: 0, data: { error: String(e) } };
+  }
+}
+
+// ── Clock ─────────────────────────────────────────────────────────────────
+function tickClock() {
+  const now = new Date();
+  document.getElementById('live-clock').textContent =
+    now.toLocaleTimeString('en-GB', { hour12: false });
+}
+setInterval(tickClock, 1000);
+tickClock();
+
+// ── Counter animation ─────────────────────────────────────────────────────
+const _animFrames = {};
+function countTo(id, target) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const from = S.prevCounters[id] ?? 0;
+  if (from === target && el.textContent !== '—') return;
+  S.prevCounters[id] = target;
+  if (_animFrames[id]) cancelAnimationFrame(_animFrames[id]);
+  const t0 = performance.now();
+  const dur = 700;
+  function step(now) {
+    const p = Math.min((now - t0) / dur, 1);
+    const e = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(from + (target - from) * e);
+    if (p < 1) _animFrames[id] = requestAnimationFrame(step);
+  }
+  _animFrames[id] = requestAnimationFrame(step);
+}
+
+// ── Posture ring ──────────────────────────────────────────────────────────
+const RING_C = 2 * Math.PI * 28; // r=28 → 175.93
+function updatePosture(success, critHigh) {
+  const pct = critHigh > 0 ? Math.min(100, (success / critHigh) * 100) : 0;
+  const fill = (pct / 100) * RING_C;
+  const ring = document.getElementById('ring-prog');
+  ring.setAttribute('stroke-dasharray', `${fill.toFixed(2)} ${(RING_C - fill).toFixed(2)}`);
+  document.getElementById('posture-pct').textContent = `${Math.round(pct)}%`;
+  const color = pct > 75 ? '#10b981' : pct > 30 ? '#f59e0b' : '#ef4444';
+  ring.style.stroke = color;
+  document.querySelector('.posture-pct').style.color = color;
+}
+
+// ── Status beacon ─────────────────────────────────────────────────────────
+function setBeacon(connected) {
+  document.getElementById('beacon').classList.toggle('offline', !connected);
+}
+
+// ── Chart.js setup ────────────────────────────────────────────────────────
+Chart.defaults.color           = '#6e7681';
+Chart.defaults.borderColor     = 'rgba(255,255,255,0.05)';
+Chart.defaults.font.family     = "Consolas, 'Courier New', monospace";
+
+const SEV_COLORS = {
+  Critical: { bg: 'rgba(255,68,68,.75)',   border: '#ff4444' },
+  High:     { bg: 'rgba(249,115,22,.75)',  border: '#f97316' },
+  Medium:   { bg: 'rgba(245,158,11,.6)',   border: '#f59e0b' },
+  Low:      { bg: 'rgba(100,116,139,.6)',  border: '#64748b' },
+};
+
+function initDonut() {
+  const ctx = document.getElementById('severity-chart').getContext('2d');
+  S.severityChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Critical','High','Medium','Low'],
+      datasets: [{
+        data: [0,0,0,0],
+        backgroundColor: [
+          SEV_COLORS.Critical.bg, SEV_COLORS.High.bg,
+          SEV_COLORS.Medium.bg,   SEV_COLORS.Low.bg,
+        ],
+        borderColor: [
+          SEV_COLORS.Critical.border, SEV_COLORS.High.border,
+          SEV_COLORS.Medium.border,   SEV_COLORS.Low.border,
+        ],
+        borderWidth: 1.5,
+        hoverOffset: 6,
+      }],
+    },
+    options: {
+      cutout: '68%',
+      animation: { duration: 800 },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.label}: ${ctx.parsed}`,
+          },
+          backgroundColor: 'rgba(10,14,26,.95)',
+          borderColor: 'rgba(255,255,255,.1)',
+          borderWidth: 1,
+          padding: 10,
+        },
+      },
+    },
+  });
+}
+
+function updateDonut(data) {
+  if (!S.severityChart) return;
+  const vals = [data.Critical||0, data.High||0, data.Medium||0, data.Low||0];
+  S.severityChart.data.datasets[0].data = vals;
+  S.severityChart.update('active');
+  const total = vals.reduce((a,b) => a+b, 0);
+  document.getElementById('dc-num').textContent = total || '—';
+  // Legend
+  const legend = document.getElementById('donut-legend');
+  const labels = ['Critical','High','Medium','Low'];
+  legend.innerHTML = labels.map((l,i) => `
+    <div class="legend-item">
+      <span class="legend-dot" style="background:${[SEV_COLORS.Critical.bg,SEV_COLORS.High.bg,SEV_COLORS.Medium.bg,SEV_COLORS.Low.bg][i]}"></span>
+      <span class="legend-name">${l}</span>
+      <span class="legend-val">${vals[i]}</span>
+    </div>`).join('');
+}
+
+function initBarChart() {
+  const ctx = document.getElementById('port-chart').getContext('2d');
+  S.portChart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderColor: [], borderWidth: 1, borderRadius: 4 }] },
+    options: {
+      indexAxis: 'y',
+      animation: { duration: 700 },
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: items => items[0].label,
+            label: ctx => ` Priority score: ${ctx.parsed.x}`,
+            afterLabel: ctx => {
+              const p = S.ports.filter(x => {
+                const lbl = portLabel(x);
+                return lbl === ctx.label;
+              })[0];
+              if (!p) return '';
+              return [
+                ` CVE: ${p.cve_reference || 'N/A'}`,
+                ` Plugin: ${p.plugin_name}`,
+                ` Severity: ${p.severity}`,
+              ].join('\n');
+            },
+          },
+          backgroundColor: 'rgba(10,14,26,.95)',
+          borderColor: 'rgba(255,255,255,.1)',
+          borderWidth: 1,
+          padding: 10,
+        },
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(255,255,255,.04)' },
+          ticks: { color: '#6e7681', font: { size: 10 } },
+        },
+        y: {
+          grid: { display: false },
+          ticks: { color: '#c9d1d9', font: { size: 10 }, maxRotation: 0 },
+        },
+      },
+    },
+  });
+}
+
+function portLabel(p) {
+  return `${p.port}/${p.protocol}${p.service ? ' ('+p.service+')' : ''}`;
+}
+
+function updateBarChart(ports) {
+  if (!S.portChart) return;
+  // Unique ports by port+protocol, take top 10 by priority score
+  const seen = new Set();
+  const items = [];
+  for (const p of ports) {
+    const k = `${p.port}/${p.protocol}`;
+    if (!seen.has(k)) { seen.add(k); items.push(p); }
+    if (items.length >= 10) break;
+  }
+  const reversed = [...items].reverse();
+  S.portChart.data.labels = reversed.map(portLabel);
+  S.portChart.data.datasets[0].data = reversed.map(p => p.priority_score);
+  S.portChart.data.datasets[0].backgroundColor = reversed.map(
+    p => p.severity === 'Critical' ? SEV_COLORS.Critical.bg : SEV_COLORS.High.bg
+  );
+  S.portChart.data.datasets[0].borderColor = reversed.map(
+    p => p.severity === 'Critical' ? SEV_COLORS.Critical.border : SEV_COLORS.High.border
+  );
+  S.portChart.update('active');
+}
+
+// ── Port chips ────────────────────────────────────────────────────────────
+function renderPortChips() {
+  const wrap = document.getElementById('port-chips');
+  if (!S.ports.length) {
+    wrap.innerHTML = '<span class="chip-empty">No Critical/High findings.</span>';
+    return;
+  }
+  // Group by port+protocol
+  const grouped = {};
+  for (const p of S.ports) {
+    const k = `${p.port}/${p.protocol}`;
+    if (!grouped[k]) grouped[k] = { port: p.port, protocol: p.protocol, service: p.service, severity: p.severity, ids: [] };
+    grouped[k].ids.push(p._id);
+  }
+  wrap.innerHTML = '';
+  for (const [, g] of Object.entries(grouped)) {
+    const secured = g.ids.every(id => S.securedIds.has(id));
+    const chip = document.createElement('div');
+    const cls = secured ? 'chip-secured' : g.severity === 'Critical' ? 'chip-open-c' : 'chip-open-h';
+    chip.className = `port-chip ${cls}`;
+    chip.id = `chip-${g.port}-${g.protocol}`;
+    chip.innerHTML = `
+      <span class="chip-port">${g.port}</span>
+      <span class="chip-svc">${esc(g.service || g.protocol)}</span>
+      <span class="chip-ico">${secured ? '✓' : '⚡'}</span>`;
+    chip.title = `${g.port}/${g.protocol}${g.service?' ('+g.service+')':''} — ${g.severity}`;
+    wrap.appendChild(chip);
+  }
+}
+
+function flashChipSecured(port, protocol) {
+  const el = document.getElementById(`chip-${port}-${protocol}`);
+  if (el && !el.classList.contains('chip-secured')) {
+    el.className = 'port-chip chip-secured chip-flip';
+    el.querySelector('.chip-ico').textContent = '✓';
+    setTimeout(() => el.classList.remove('chip-flip'), 600);
+  }
+}
+
+// ── Metrics panel ─────────────────────────────────────────────────────────
+function updateMetrics(m, dbConnected) {
+  document.getElementById('m-rate').textContent  = m.success_rate != null ? `${m.success_rate}%` : '—';
+  document.getElementById('m-total').textContent = m.total_actions ?? '—';
+  document.getElementById('m-s').textContent     = m.success ?? '—';
+  document.getElementById('m-f').textContent     = m.failed  ?? '—';
+  document.getElementById('m-k').textContent     = m.skipped ?? '—';
+  if (m.mttr_seconds != null) {
+    const s = m.mttr_seconds;
+    document.getElementById('m-mttr').textContent =
+      s >= 60 ? `${Math.floor(s/60)}m ${Math.round(s%60)}s` : `${s}s`;
+  } else {
+    document.getElementById('m-mttr').textContent = 'N/A';
+  }
+  const dbEl = document.getElementById('m-db');
+  dbEl.textContent = dbConnected ? '✓ Connected' : '✗ Offline';
+  dbEl.className = `metric-num ${dbConnected ? 'c-green' : 'c-red'}`;
+}
+
+// ── Timeline feed ──────────────────────────────────────────────────────────
+function addTimelineEntries(logs) {
+  const feed = document.getElementById('tl-feed');
+  const empty = feed.querySelector('.tl-empty');
+
+  let added = 0;
+  for (const log of logs) {
+    const lid = log.log_id;
+    if (lid == null || S.shownLogIds.has(lid)) continue;
+    S.shownLogIds.add(lid);
+    if (empty) empty.remove();
+
+    const st = log.execution_status || 'Unknown';
+    const cls = st === 'Success' ? 'e-success' : st === 'Failed' ? 'e-failed' : 'e-skipped';
+    const badgeCls = st === 'Success' ? 'badge-success' : st === 'Failed' ? 'badge-failed' : 'badge-skipped';
+    const ts = (log.timestamp || '').replace('T',' ').slice(0,19);
+
+    const div = document.createElement('div');
+    div.className = `tl-entry ${cls} new`;
+    div.innerHTML = `
+      <div class="tl-ts">${esc(ts)} &nbsp;|&nbsp; Port ${esc(String(log.target_port??'?'))}</div>
+      <div class="tl-plugin">${esc(log.plugin_name||'Unknown')}</div>
+      <div class="tl-cmd">${esc((log.command_dispatched||'').slice(0,80))}${(log.command_dispatched||'').length>80?'…':''}</div>
+      <span class="tl-status-badge ${badgeCls}">${esc(st)}</span>`;
+    feed.prepend(div);
+    setTimeout(() => div.classList.remove('new'), 500);
+    added++;
+  }
+
+  if (added) {
+    const now = new Date().toLocaleTimeString('en-GB', { hour12: false });
+    const el = document.getElementById('tl-refresh');
+    if (el) el.textContent = `Updated ${now}`;
+  }
+}
+
+// ── Findings / Approval cards ──────────────────────────────────────────────
+function renderFindings() {
+  const container = document.getElementById('findings-container');
+  if (!S.findings.length) {
+    container.innerHTML = '<div class="loading-msg">No Critical/High findings.</div>';
+    document.getElementById('queue-badge').textContent = '0 pending';
+    return;
+  }
+  container.innerHTML = S.findings.map(renderCard).join('');
+  const pending = S.findings.filter(f => {
+    const st = S.findingStates[f._id];
+    return !st || st.stage === 'idle' || st.stage === 'confirming';
+  }).length;
+  document.getElementById('queue-badge').textContent = `${pending} pending`;
+}
+
+function renderCard(f) {
+  const st = S.findingStates[f._id] || { stage: 'idle' };
+  const cardCls = st.stage === 'done'
+    ? (st.result?.status === 'Success' ? 's-done' : 's-failed')
+    : st.stage === 'executing' ? 's-executing' : '';
+  const disabled = st.stage !== 'idle' ? 'disabled' : '';
+
+  const pref = f._options.filter(o => o.tier === 'preferred');
+  const alts = f._options.filter(o => o.tier === 'alternative');
+  const sugs = f._options.filter(o => o.tier === 'suggested');
+  const mon  = f._options.filter(o => o.tier === 'monitor');
+
+  const btn = o => `<button class="opt-btn opt-${esc(o.tier)}" ${disabled}
+    onclick="selectOpt('${escA(f._id)}','${escA(o.key)}','${escA(o.label)}','${escA(o.command||'')}','${o.tier}')"
+    title="${esc(o.command||'(no command)')}">
+    <span class="btn-tier">${esc(tierLabel(o.tier))}</span>
+    <span class="btn-label">${esc(o.label)}</span>
+  </button>`;
+
+  let optHtml = pref.map(btn).join('');
+  if (alts.length) optHtml += alts.map(btn).join('');
+  if (sugs.length) {
+    optHtml += `<span class="sug-divider">⬇ System-Suggested (lower priority)</span>`;
+    optHtml += sugs.map(btn).join('');
+  }
+  optHtml += mon.map(btn).join('');
+
+  let bodyInner = `<div class="opts-grid">${optHtml}</div>`;
+  if (st.stage === 'confirming') bodyInner += confirmPanel(f._id, st.pending);
+  else if (st.stage === 'executing') bodyInner += `<div class="exec-row"><div class="spinner"></div>Executing on 192.168.244.128 — please wait…</div>`;
+  else if (st.stage === 'done') bodyInner += resultBanner(st.result);
+
+  return `<div class="finding-card ${cardCls}" id="fc-${esc(f._id)}">
+    <div class="finding-hd">
+      <span class="sev-badge sev-${esc(f.severity)}">${esc(f.severity)}</span>
+      <span class="finding-name">${esc(f.plugin_name)}</span>
+      <div class="finding-meta">
+        <span>:${esc(String(f.port))}/${esc(f.protocol)}</span>
+        <span>${esc(f.cve_reference||'No CVE')}</span>
+        <span>CVSS ${esc(String(f.cvss_base_score||'—'))}</span>
+        <span class="p-badge">Score ${esc(String(f.priority_score))}</span>
+      </div>
+    </div>
+    <div class="finding-body">${bodyInner}</div>
+  </div>`;
+}
+
+function tierLabel(t) {
+  return { preferred:'⭐ Preferred', alternative:'Alternative', suggested:'💡 Suggested', monitor:'Monitor' }[t] || t;
+}
+
+function confirmPanel(fid, p) {
+  return `<div class="confirm-panel">
+    <div class="confirm-hd">⚠ Confirm — action will execute on live target</div>
+    <div class="confirm-row"><span class="confirm-key">Action: </span>${esc(p.label)}</div>
+    <div class="confirm-row">
+      <span class="confirm-key">Command:</span>
+      <div class="confirm-cmd">${esc(p.command||'(no remote command — monitor only)')}</div>
+    </div>
+    <div class="confirm-warn">⚠ This command will run on live target <strong>192.168.244.128</strong>. This action cannot be automatically undone.</div>
+    <div class="confirm-btns">
+      <button class="btn-exec" onclick="execAction('${escA(fid)}','${escA(p.optKey)}')">Execute — I Confirm</button>
+      <button class="btn-cancel" onclick="cancelConfirm('${escA(fid)}')">Cancel</button>
+    </div>
+  </div>`;
+}
+
+function resultBanner(r) {
+  if (!r) return '';
+  const st = r.status || 'Failed';
+  const cls = st === 'Success' ? 'res-success' : st === 'Skipped' ? 'res-skipped' : 'res-failed';
+  const ico = st === 'Success' ? '✓' : st === 'Skipped' ? '○' : '✗';
+  const db = r.db_error ? `<span class="res-note">DB log error: ${esc(r.db_error)}</span>` : '';
+  return `<div class="result-banner ${cls}">
+    <span class="res-lbl">${ico} ${esc(st)} — ${r.attempts ?? '?'} attempt${r.attempts===1?'':'s'}</span>
+    <span class="res-cmd">${esc((r.command||'(monitor — no command)').slice(0,100))}</span>
+    ${db}
+  </div>`;
+}
+
+// ── Approval actions (two-step, no auto-fire) ─────────────────────────────
+function selectOpt(fid, key, label, command, tier) {
+  S.findingStates[fid] = { stage: 'confirming', pending: { optKey: key, label, command, tier } };
+  renderFindings();
+  const card = document.getElementById(`fc-${fid}`);
+  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function cancelConfirm(fid) {
+  S.findingStates[fid] = { stage: 'idle' };
+  renderFindings();
+}
+
+async function execAction(fid, optKey) {
+  S.findingStates[fid] = { ...S.findingStates[fid], stage: 'executing' };
+  renderFindings();
+
+  const { ok, data } = await api('/api/remediate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ finding_id: fid, option_key: optKey, operator: 'web-operator' }),
+  });
+
+  S.findingStates[fid] = { stage: 'done', result: data };
+  if (data.status === 'Success') {
+    S.securedIds.add(fid);
+    // Flip the matching port chip
+    const finding = S.findings.find(f => f._id === fid);
+    if (finding) flashChipSecured(finding.port, finding.protocol);
+  }
+  renderFindings();
+
+  // Immediate refresh of all counters and timeline
+  await Promise.all([refreshStatus(), refreshMetrics(), refreshLogs()]);
+}
+
+// ── Data fetchers ─────────────────────────────────────────────────────────
+async function loadFindings() {
+  const { ok, data } = await api('/api/findings');
+  if (!ok) {
+    document.getElementById('findings-container').innerHTML =
+      `<div class="error-box">⚠ ${esc(data.error||'Failed to load findings')}</div>`;
+    return;
+  }
+  S.findings = data.findings || [];
+  S.findings.forEach(f => { if (!S.findingStates[f._id]) S.findingStates[f._id] = { stage: 'idle' }; });
+  renderFindings();
+}
+
+async function loadPorts() {
+  const { ok, data } = await api('/api/ports');
+  if (ok) {
+    S.ports = data.ports || [];
+    updateBarChart(S.ports);
+    renderPortChips();
+  }
+}
+
+async function loadSeverity() {
+  const { ok, data } = await api('/api/severity-breakdown');
+  if (ok) updateDonut(data);
+}
+
+async function refreshStatus() {
+  const { ok, data } = await api('/api/status');
+  if (!ok) return;
+  setBeacon(data.db_connected);
+  countTo('cv-total',    data.total_findings    ?? 0);
+  countTo('cv-crithigh', data.critical_high     ?? 0);
+  countTo('cv-success',  data.remediated_success ?? 0);
+  updatePosture(data.remediated_success ?? 0, data.critical_high ?? 0);
+}
+
+async function refreshMetrics() {
+  const [mRes, sRes] = await Promise.all([api('/api/metrics'), api('/api/status')]);
+  if (mRes.ok) {
+    const dbConn = sRes.ok ? sRes.data.db_connected : false;
+    updateMetrics(mRes.data, dbConn);
+    countTo('cv-failed',  mRes.data.failed  ?? 0);
+    countTo('cv-skipped', mRes.data.skipped ?? 0);
+  }
+}
+
+async function refreshLogs() {
+  const { ok, data } = await api('/api/logs');
+  if (ok) addTimelineEntries(data.logs || []);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+(async () => {
+  initDonut();
+  initBarChart();
+
+  // Initial parallel load
+  await Promise.all([
+    loadFindings(),
+    loadPorts(),
+    loadSeverity(),
+    refreshStatus(),
+    refreshMetrics(),
+    refreshLogs(),
+  ]);
+
+  // Poll every 6 seconds (status, metrics, logs — not findings/ports/severity which are static)
+  setInterval(async () => {
+    await Promise.all([refreshStatus(), refreshMetrics(), refreshLogs()]);
+  }, 6_000);
+})();
+</script>
+</body>
+</html>
